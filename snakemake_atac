@@ -1,0 +1,61 @@
+REP_INDEX={"1WHF4-1eggATAC","2WHF4-1eggATAC"}
+Bowtie2_Index="/home/sqmao/18_Ref/correct/female/new/Mi"
+Threads="64"
+rule all:
+	input:
+		expand("/home/sqmao/new_atac/data/snake/bam/{rep}_bt2.bam",rep=REP_INDEX),
+		expand("/home/sqmao/new_atac/data/snake/rm_dup/{rep}_bt2.rmdup.bam",rep=REP_INDEX),
+		expand("/home/sqmao/new_atac/data/snake/macs/{rep}_peak.narrow.peak",rep=REP_INDEX)
+
+#########Step1:
+rule Cutadapter:
+	input:
+		"/home/sqmao/new_atac/data/{rep}_R1.fq",
+		"/home/sqmao/new_atac/data/{rep}_R2.fq"
+	output:
+		"/home/sqmao/new_atac/data/snake/cutadapter_seq_{rep}/{rep}_R1_val_1.fq",
+		"/home/sqmao/new_atac/data/snake/cutadapter_seq_{rep}/{rep}_R2_val_2.fq"
+	params:
+                "cutadapter_seq_{rep}"
+	log:
+		"/home/sqmao/new_atac/data/snake/{rep}_cutadapt.log"
+	shell:
+		"trim_galore -q 25 --phred33 --length 35 -e 0.1 --stringency 4 --paired {input[0]} {input[1]} -o {params[0]} > {log} 2>&1 &"
+		
+############Step2:
+rule bowtie2_mapping:
+	input:
+		"/home/sqmao/new_atac/data/snake/cutadapter_seq_{rep}/{rep}_R1_val_1.fq",
+                "/home/sqmao/new_atac/data/snake/cutadapter_seq_{rep}/{rep}_R2_val_2.fq"
+	output:
+		"/home/sqmao/new_atac/data/snake/bam/{rep}_bt2.sort.bam"
+	log:
+		"/home/sqmao/new_atac/data/snake/bam/{rep}_bt2.bam"
+	shell:
+		"bowtie2 -p {Threads} --very-sensitive -x {Bowtie2_Index} -1 {input[0]} -2 {input[1]} | samtools sort -@ {Threads} -O bam -o {output[0]} > {log} 2>&1 &"
+
+#############Step3:
+rule rm_dup:
+	input:
+		"/home/sqmao/new_atac/data/snake/bam/{rep}_bt2.sort.bam"
+	output:
+		"/home/sqmao/new_atac/data/snake/rm_dup/{rep}_bt2.rmdup.bam"
+	log:
+		"/home/sqmao/new_atac/data/snake/bam/{rep}_bt2.log"
+	shell:
+		"sambamba markdup --overflow-list-size 600000 --tmpdir='./' -r {input[0]} {output[0]} > {log} 2>&1 &"
+
+
+################Step4:		
+rule call_peak:
+	input:
+		"/home/sqmao/new_atac/data/snake/rm_dup/{rep}_bt2.rmdup.bam"
+	output:
+		"/home/sqmao/new_atac/data/snake/macs/{rep}_peak.narrow.peak"
+	params:
+		"ATAC_seq_{rep}",
+		"macs2_result"			
+	log:
+		"/home/sqmao/new_atac/data/snake/macs/{rep}_peak.narrow.log"
+	shell:
+		"macs2 callpeak -t {input[0]} -g 2e8 --nomodel --shift -100 --extsize 200  -n {params[0]} --outdir {params[1]} > {log} 2>&1 &"
